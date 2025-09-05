@@ -456,7 +456,7 @@ shapiro.test(P1_1)</code></pre>
 ## W = 0.97279, p-value = 0.2256</code></pre>
 <pre class="r"><code># --- Avaliar homocedasticidade ---
 val_P1 &lt;- c(P1_1, P1_2)
-val_P2 &lt;- c(P2_1, P2_2)  # corrigido
+val_P2 &lt;- c(P2_1, P2_2)
 
 grupo_P1 &lt;- factor(rep(c(&quot;P1_1&quot;,&quot;P1_2&quot;), times=c(n1,n2)))
 grupo_P2 &lt;- factor(rep(c(&quot;P2_1&quot;,&quot;P2_2&quot;), times=c(n1,n2)))

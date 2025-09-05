@@ -370,8 +370,8 @@ display: none;
 # --- Reprodutibilidade ---
 set.seed(129)
 
-library(MASS)   # Para mvrnorm
-library(psych)  # Estatísticas descritivas
+library(MASS)
+library(psych)
 
 # --- Tamanhos amostrais ---
 n1 &lt;- 35  # Ran=1 (Experimental)
@@ -469,7 +469,7 @@ shapiro.test(P1_1)</code></pre>
 ## 
 ## data:  P2_2
 ## W = 0.97293, p-value = 0.2291</code></pre>
-<pre class="r"><code># --- Calcular Delta ---
+<pre class="r"><code># --- Calcular Delta ---  #Avaliar Ran 1 e Ran 2 em razão de P1 e p2
 dados3$Delta &lt;- dados3$P2 - dados3$P1
 
 # --- Estatísticas descritivas do Delta ---
