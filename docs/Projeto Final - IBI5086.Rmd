@@ -1,0 +1,956 @@
+###############################################################################
+# PROJETO FINAL - INTRODUÇÃO AOS MÉTODOS ESTATÍSTICOS PARA BIOINFORMÁTICA
+###############################################################################
+
+# =========================
+# Pacotes Necessários
+# =========================
+
+# install.packages(c("dplyr","tidyverse","vegan","RColorBrewer","VennDiagram","factoextra","ggplot2","pheatmap""patchwork"))
+
+library (dplyr)
+library(tidyverse)
+library(vegan)
+library(RColorBrewer) 
+library(VennDiagram)  
+library(factoextra)   
+library (ggplot2)
+library(pheatmap)
+
+suppressPackageStartupMessages({
+  try(suppressWarnings(library(patchwork)), silent = TRUE)
+})
+
+# =========================
+# Simular os dados
+# =========================
+set.seed(123)        # Fixando seed
+n_trat <- 3          # número de tratamentos
+n_rep  <- 10         # réplicas biológicas por tratamento
+n_gen  <- 50         # número de gêneros por amostra
+n_amostras <- n_trat * n_rep
+
+# Criar de Matriz vazia
+abund_mat <- matrix(NA_real_, nrow = n_amostras, ncol = n_gen)
+colnames(abund_mat) <- paste0("Genus_", 1:n_gen)
+
+# Sortear pesos de diversidade
+pesos <- sample(1:250, size = 500, replace = TRUE)
+
+# Sortear cada um dos tratamentos baseado nos pesos de diversidade
+ctrl_base <- sample(pesos, size = 50, replace = TRUE)
+x_base    <- sample(pesos, size = 50, replace = TRUE)
+y_base    <- sample(pesos, size = 50, replace = TRUE)
+base      <- cbind(ctrl_base, x_base, y_base)
+
+# Gerar os dados_microbioma de cada unidade amostral por loop
+a <- 1
+for (i in 1:3) {
+  for (j in 1:10) {
+    x <- rgamma(50, shape = base[, i], rate = 1)
+    abund_mat[a, ] <- x / sum(x)
+    a <- a + 1
+  }
+}
+
+# Gerar Dataframe final
+tratamento <- rep(paste0("T", 1:n_trat), each = n_rep)
+replica    <- rep(1:n_rep, times = n_trat)
+
+dados_microbioma <- data.frame(
+  tratamento = tratamento,
+  abund_mat,
+  check.names = FALSE
+)
+
+# Avaliar estrutura
+str(dados_microbioma)
+
+# =========================
+# Gráficos de Microbioma por Tratamento
+# =========================
+
+#Gráfico contendo gêneros por tratamento
+
+# Converter para o formato long e %
+dados_long2 <- dados_microbioma |>
+  pivot_longer(
+    cols = starts_with("Genus_"),
+    names_to  = "Genero",
+    values_to = "Abundance"
+  ) |>
+  mutate(
+    Abundance  = Abundance * 100,
+    Replica    = rep(rep(1:10, times = 3), each = 50),
+    tratamento = factor(tratamento, levels = c("T1","T2","T3"))
+  )
+
+
+# Gerar Paleta de cores
+cores_set3 <- colorRampPalette(brewer.pal(12,"Set3"))(50)
+
+
+# Gerar Barplot empilhado (amostras individuais)
+
+pclass <- ggplot(dados_long2,
+                 aes(x = factor(Replica),
+                     y = Abundance,
+                     fill = Genero)) +
+  geom_bar(stat = "identity", width = 0.95) +
+  facet_wrap(~tratamento, scales = "free_x") +
+  labs(
+    x = "Réplica biológica",
+    y = "Abundância relativa (%)",
+    title = "Composição individual da microbiota por tratamento",
+    fill = "Gênero"
+  ) +
+  scale_fill_manual(values = cores_set3) +
+  theme_minimal() +
+  theme(
+    axis.text.x  = element_text(angle = 90, hjust = 1, size = 8),
+    plot.title   = element_text(hjust = 0.5, face = "bold", size = 14),
+    strip.text   = element_text(face = "bold"),
+    legend.text  = element_text(size = 7),
+    legend.title = element_text(face = "bold")
+  )
+
+pclass
+
+
+# Gerar Barplot mesclado (médias por tratamento)
+
+dados_mesclado <- dados_long2 |>
+  group_by(tratamento, Genero) |>
+  summarise(TotalAbundance = sum(Abundance), .groups = "drop") |>
+  group_by(tratamento) |>
+  mutate(RelAbundance = TotalAbundance / sum(TotalAbundance) * 100) |>
+  ungroup()
+
+p_mesclado <- ggplot(dados_mesclado,
+                     aes(x = tratamento,
+                         y = RelAbundance,
+                         fill = Genero)) +
+  geom_bar(stat = "identity", width = 0.8) +
+  scale_fill_manual(values = cores_set3) +
+  labs(
+    y = "Abundância relativa (%)",
+    x = "Tratamento",
+    title = "Composição média (mesclada) da microbiota por tratamento",
+    fill = "Gênero"
+  ) +
+  theme_minimal() +
+  theme(
+    plot.title  = element_text(hjust = 0.5, face = "bold"),
+    axis.text.x = element_text(face = "bold"),
+    legend.text = element_text(size = 7),
+    legend.title = element_text(face = "bold")
+  )
+
+p_mesclado
+
+# =========================
+# Análise descritiva de variabilidade dos dados 
+# =========================
+
+# Abundância relativa dos tratamentos por gênero
+
+#Converter para o formato long
+library(tidyverse)
+
+dados_long <- dados_microbioma %>%
+  pivot_longer(
+    cols = starts_with("Genus_"),
+    names_to = "Genus",
+    values_to = "Abundancia"
+  )
+
+# Ordenar "Genus" para melhor visualização no boxplot
+
+dados_long$Genus <- factor(
+  dados_long$Genus,
+  levels = paste0("Genus_", 1:50)
+)
+
+# Ajustar tamanho do boxplot
+
+options(repr.plot.width = 18, repr.plot.height = 6)
+
+# Gerar Boxplot - Distribuição de abundância dos tratamentos por gênero
+ggplot(dados_long, aes(x = Genus, y = Abundancia)) +
+  geom_boxplot(outlier.shape = NA, fill = "white") +
+  geom_jitter(aes(color = tratamento), width = 0.2, alpha = 0.6, size = 1.5) +
+  theme_bw() +
+  theme(
+    axis.text.x = element_text(angle = 90, vjust = 0.5, size = 10),
+    plot.title = element_text(size = 14, face = "bold")
+  ) +
+  labs(
+    title = "Distribuição de abundâncias dos gêneros por tratamento",
+    x = "Gêneros",
+    y = "Abundância",
+    color = "Tratamento"
+  )
+
+ggplot(dados_long, aes(x = Genus, y = Abundancia)) +
+  geom_boxplot(outlier.shape = NA, fill = "white") +
+  geom_jitter(aes(color = tratamento), width = 0.2, alpha = 0.6, size = 1.5) +
+  theme_bw() +
+  theme(
+    axis.text.x = element_text(angle = 90, vjust = 0.5, size = 10),
+    plot.title = element_text(size = 14, face = "bold")
+  ) +
+  labs(
+    title = "Distribuição de abundâncias dos gêneros por tratamento",
+    x = "Gêneros",
+    y = "Abundância",
+    color = "Tratamento"
+  )
+
+# Selecionar colunas referentes às abundâncias relativas
+
+Genus <- dados_microbioma[ , grepl("^Genus", names(dados_microbioma)) ]
+Genus_log <- log(Genus)
+Genus <- Genus_log - rowMeans(Genus_log)
+head(Genus)
+
+# Calcular centróides
+
+mu0_barra <- colMeans(Genus)
+mu0_df <- as.data.frame(t(mu0_barra))
+mu0_df
+
+# Gerar Matriz de covariância geral
+
+cov <- cov(Genus, use = "complete.obs")
+head(cov)
+
+# Decompor matriz de covariância
+
+eigen <- eigen(cov(Genus))
+eigen
+
+# Extrair os autovalores
+
+autovalores <- eigen$values
+autovalores
+
+# Traçar matriz de covariância
+
+traco <- sum(autovalores)
+traco
+
+determinante <- prod(autovalores)
+determinante
+
+# Gerar Matriz de correlação geral
+
+cor_matrix <- cov2cor(cov)
+head(cor_matrix)
+
+# Gerar Matriz de distâncias euclidianas
+
+dist_eucl <- dist(Genus, method = "euclidean")
+
+# Ver como matriz:
+dist_matrix <- as.matrix(dist_eucl)
+head(dist_matrix)
+
+
+# =========================
+# Análise descritiva de diversidade para dados_microbioma_microbioma de 16S (bactéria)
+# =========================
+
+# Garantir fator com níveis ordenados
+dados_microbioma$tratamento <- factor(dados_microbioma$tratamento,
+                                      levels = c("T1", "T2", "T3"))
+
+# Criar ID da amostra (se não existir)
+if (!"sample_id" %in% names(dados_microbioma)) {
+  dados_microbioma$sample_id <- paste0("S", seq_len(nrow(dados_microbioma)))
+}
+
+# Selecionar matriz de gêneros
+Genus <- dados_microbioma %>%
+  dplyr::select(starts_with("Genus_"))
+
+# Conferência de dimensão esperada
+dim(Genus)  # Deve ser 30 x 50
+
+# Conversão para matriz
+Genus_mat <- as.matrix(Genus) #ALFA
+Genus_rel <- Genus_mat / rowSums(Genus_mat) #BETA
+
+dist_bc <- vegdist(Genus_rel, method = "bray")
+
+# Cálculo de métricas básicas (já usado na ALFA)
+dados_microbioma <- dados_microbioma %>%
+  mutate(
+    abund_total = rowSums(Genus_mat),
+    riqueza     = rowSums(Genus_mat > 0)
+  )
+
+# Conferência geral
+str(dados_microbioma)
+head(dados_microbioma[, c("sample_id", "tratamento", "abund_total", "riqueza")])
+
+# 1 - Diversidade ALFA - Índice de Shannon
+
+# Cálculo de Shannon
+dados_microbioma$shannon <- diversity(Genus_mat, index = "shannon")
+
+head(dados_microbioma[, c("tratamento", "abund_total", "riqueza", "shannon")])
+
+# Estatística descritiva por grupo
+estat_basica <- dados_microbioma %>%
+  group_by(tratamento) %>%
+  summarise(
+    media_abundancia = mean(abund_total),
+    desvio           = sd(abund_total),
+    riqueza_media    = mean(riqueza),
+    shannon_media    = mean(shannon),
+    .groups = "drop"
+  )
+
+estat_basica
+
+# Estatísticas globais
+summary(dados_microbioma$shannon)
+
+# Boxplot - Shannon
+ggplot(dados_microbioma, aes(x = tratamento, y = shannon, fill = tratamento)) +
+  geom_boxplot(alpha = 0.8, outlier.color = "black") +
+  theme_minimal() +
+  labs(
+    title = "Distribuição da Diversidade (Shannon) por Tratamento",
+    x = "Tratamento",
+    y = "Índice de Shannon"
+  )
+
+# Outliers em Shannon
+Q1  <- quantile(dados_microbioma$shannon, 0.25)
+Q3  <- quantile(dados_microbioma$shannon, 0.75)
+IQR <- Q3 - Q1
+
+lim_inf <- Q1 - 1.5 * IQR
+lim_sup <- Q3 + 1.5 * IQR
+
+outliers <- dados_microbioma %>%
+  filter(shannon < lim_inf | shannon > lim_sup)
+
+outliers
+nrow(outliers)
+
+# 2 - Diversidade ALFA - Índice de Simpson
+
+# Cálculo de Simpson
+dados_microbioma$simpson <- diversity(Genus_mat, index = "simpson")
+
+head(dados_microbioma[, c("tratamento", "simpson")])
+
+# Estatística descritiva
+estat_simpson <- dados_microbioma %>%
+  group_by(tratamento) %>%
+  summarise(
+    simpson_media = mean(simpson),
+    simpson_sd    = sd(simpson),
+    .groups = "drop"
+  )
+
+estat_simpson
+
+# Estatísticas globais
+summary(dados_microbioma$simpson)
+
+# Boxplot - Simpson
+ggplot(dados_microbioma, aes(x = tratamento, y = simpson, fill = tratamento)) +
+  geom_boxplot(alpha = 0.8, outlier.color = "black") +
+  theme_minimal() +
+  labs(
+    title = "Distribuição da Diversidade (Simpson) por Tratamento",
+    x = "Tratamento",
+    y = "Índice de Simpson"
+  )
+
+# Outliers em Simpson
+Q1_s  <- quantile(dados_microbioma$simpson, 0.25)
+Q3_s  <- quantile(dados_microbioma$simpson, 0.75)
+IQR_s <- Q3_s - Q1_s
+
+lim_inf_s <- Q1_s - 1.5 * IQR_s
+lim_sup_s <- Q3_s + 1.5 * IQR_s
+
+outliers_simpson <- dados_microbioma %>%
+  filter(simpson < lim_inf_s | simpson > lim_sup_s)
+
+outliers_simpson
+nrow(outliers_simpson)
+
+
+# 3 - Diversidade BETA - NMDS
+
+# Gerar NMDS
+set.seed(123)  # reprodutibilidade
+nmds <- metaMDS(dist_bc, k = 2, trymax = 100)
+nmds
+
+# Gerar coordenadas do NMDS
+nmds_points <- as.data.frame(nmds$points)
+colnames(nmds_points) <- c("NMDS1", "NMDS2")
+
+# Adicionar tratamento
+nmds_points$tratamento <- dados_microbioma$tratamento
+
+# Calcular centróides por tratamento
+centroides <- nmds_points %>%
+  group_by(tratamento) %>%
+  summarise(
+    NMDS1 = mean(NMDS1),
+    NMDS2 = mean(NMDS2),
+    .groups = "drop"
+  )
+
+# Gerar Plot de NMDS
+ggplot(nmds_points, aes(NMDS1, NMDS2, color = tratamento)) +
+  geom_point(size = 3, alpha = 0.9) +
+  stat_ellipse(aes(fill = tratamento), geom = "polygon",
+               alpha = 0.15, color = NA) +
+  geom_point(data = centroides,
+             aes(NMDS1, NMDS2, color = tratamento),
+             shape = 4, size = 6, stroke = 1.5) +
+  theme_minimal() +
+  coord_equal() + 
+  labs(
+    title = "NMDS – Dissimilaridade Bray-Curtis",
+    x = "NMDS 1",
+    y = "NMDS 2"
+  )
+
+# Gerar stress de NMDS
+nmds$stress
+stressplot(nmds)
+
+# Avaliar Confiança de NMDS
+if(nmds$stress < 0.15){
+  message("✅ NMDS confiável (stress < 0.15)")
+} else if(nmds$stress < 0.20){
+  message("⚠️ NMDS aceitável (stress < 0.20)")
+} else {
+  message("❌ NMDS fraco (stress > 0.20)")
+}
+
+nmds3 <- metaMDS(dist_bc, k = 3)
+nmds3$stress
+summary(dist_bc)
+range(dist_bc)
+
+# 4 - PERMANOVA
+
+# Gerar PERMANOVA
+adonis_res <- adonis2(dist_bc ~ tratamento,
+                      data = dados_microbioma,
+                      permutations = 999)
+
+adonis_res
+
+# Gerar dispersão
+betadisp <- betadisper(dist_bc, dados_microbioma$tratamento)
+anova(betadisp)
+permutest(betadisp)
+
+#Gerar boxplot de dispersão
+boxplot(betadisp, col = as.numeric(dados_microbioma$tratamento),
+        main = "Dispersão beta por tratamento")
+
+# =========================
+# Análise de Componentes Principais (PCA)
+# =========================
+
+# PCA
+pca <- prcomp(Genus)
+pca
+
+# Criar dataframe com PC1 e PC2
+pca_df <- data.frame(
+  tratamento = dados_microbioma$tratamento,
+  PC1 = pca$x[,1],
+  PC2 = pca$x[,2]
+)
+pca_df
+
+# Configurar para ajuste de tamanho do plot
+options(repr.plot.width = 6, repr.plot.height = 6)
+
+# Gerar Gráfico de PCA
+ggplot(data = pca_df, aes(x = PC1, y = PC2, color = tratamento)) +
+  geom_point(size = 3) +
+  theme_minimal() +
+  labs(title = "PCA das abundâncias (Genus_1 ... Genus_50)",
+       x = "PC1",
+       y = "PC2")
+
+# Variáveis de maiores cargas na construção dos componentes principais
+
+# Determinar o número de táxons a ser destacado
+top <- 10
+
+# Determinar o vetor de coeficientes para PC1
+vals <- abs(pca$rotation[, 1])
+
+# Gerar dataframe com os valores dos coeficientes do CP - PC1
+pc1 <- data.frame(
+  val = vals,
+  idx = seq(length(vals))
+)
+
+# Identificar os maiores (baseado no valor 'top') - PC1
+pc1 <- pc1[order(pc1$val, decreasing = TRUE),]
+pc1$highlight <- c(rep("top", top), rep("other", 50 - top))
+
+# Determinar o vetor de coeficientes para PC2
+vals <- abs(pca$rotation[, 2])
+
+# Gerar dataframe com os valores dos coeficientes do CP - PC2
+pc2 <- data.frame(
+  val = vals,
+  idx = seq(length(vals))
+)
+
+# Identificar os maiores (baseado no valor 'top') - PC2
+pc2 <- pc2[order(pc2$val, decreasing = TRUE),]
+pc2$highlight <- c(rep("top", top), rep("other", 50 - top))
+
+# Gerar gráfico para PC1
+pca1_coef <- ggplot(pc1, aes(x = idx, y = val)) +
+  geom_point(
+    aes(color = highlight)
+  ) +
+  scale_color_manual(values = c("other" = "black", "top" = "red")) +
+  ylab("Módulo do coeficiente") +
+  xlab("Genus") +
+  theme_minimal() +
+  geom_text(
+    data = pc1[pc1$highlight == "top", ],
+    aes(label = idx),
+    vjust = 1.5,
+    col = "red"
+  ) +
+  labs(title = "PC1") +
+  theme(
+    plot.title = element_text(
+      hjust = 0,
+      face = "bold"
+    )
+  )
+
+# Gerar gráfico para PC2
+pca2_coef <- ggplot(pc2, aes(x = idx, y = val)) +
+  geom_point(
+    aes(color = highlight)
+  ) +
+  scale_color_manual(values = c("other" = "black", "top" = "blue")) +
+  ylab("Módulo do coeficiente") +
+  xlab("Genus") +
+  theme_minimal() +
+  geom_text(
+    data = pc2[pc2$highlight == "top", ],
+    aes(label = idx),
+    vjust = 1.5,
+    col = "blue"
+  ) +
+  labs(title = "PC2") +
+  theme(
+    plot.title = element_text(
+      hjust = 0,
+      face = "bold"
+    )
+  )
+
+pca1_coef/pca2_coef
+
+# Selecionar os cinco gêneros de maiores cargas para plotar no biplot
+loading <- pca$rotation
+
+# PC1
+pc1_load <- sort(abs(loading[,1]), decreasing = TRUE)[1:5]
+pc1_top <- names(pc1_load)
+
+# PC2
+pc2_load <- sort(abs(loading[,2]), decreasing = TRUE)[1:5]
+pc2_top <- names(pc2_load)
+
+cat("Gêneros com maiores cargas no primeiro componente principal:\n")
+print(pc1_top)
+
+cat("\nGêneros com maiores cargas no segundo componente principal:\n")
+print(pc2_top)
+
+# Calcular quanto da variância o componente principal explica - PC1
+var_PC1 <- pca$sdev[1]^2 * 100/ sum(pca$sdev^2)
+
+# Calcular autovalor da PC1 dividido pela soma dos autovalores - PC1
+var_PC1
+
+# Calcular quanto da variância o componente principal explica - PC2
+var_PC2 <- pca$sdev[2]^2 * 100/ sum(pca$sdev^2)
+
+# Calcular autovalor da PC1 dividido pela soma dos autovalores - PC2
+var_PC2
+
+# Total
+var_PC1 + var_PC2
+
+# Unir os gêneros de maior contribuição para plotar
+top_genus <- unique(c(pc1_top, pc2_top))
+
+# Criar dataframe com as cargas dos gêneros de maior contribuição
+load_df <- as.data.frame(loading)
+load_df$genus <- rownames(load_df)
+
+load_df_top <- load_df[load_df$genus %in% top_genus, ]
+
+# Escalar as cargas para melhor visualização
+scale_factor <- 6  # ajuste se as setas ficarem muito curtas ou longas
+
+load_df_top$PC1 <- load_df_top$PC1 * scale_factor
+load_df_top$PC2 <- load_df_top$PC2 * scale_factor
+
+# Plotar Gráfico
+ggplot(data = pca_df, aes(x = PC1, y = PC2, color = tratamento)) +
+  geom_point(size = 4) +
+  
+# Estabelecer setas dos gêneros
+geom_segment(data = load_df_top,
+             aes(x = 0, y = 0,
+                 xend = PC1, yend = PC2),
+             arrow = arrow(length = unit(0.2, "cm")),
+             color = "grey40",
+             inherit.aes = FALSE) +
+  
+# Estabelecer nomes dos gêneros
+geom_text(data = load_df_top,
+          aes(x = PC1, y = PC2, label = genus),
+          color = "black",
+          size = 4,
+          vjust = -0.5,
+          inherit.aes = FALSE) +
+  
+  theme_minimal() +
+  labs(title = "PCA das abundâncias (Genus_1 ... Genus_50)",
+       x = "PC1",
+       y = "PC2")
+
+# =========================
+# Modelos de regressão
+# =========================
+
+# Avaliar suposições de ANOVA
+anova_check <- function(df,
+                        treat_col = 1,
+                        alpha = 0.05 ) {
+  
+# Separar variável de tratamento
+grupo <- factor(df[[treat_col]])
+  
+# Selecionar colunas numéricas
+X <- df[, -(treat_col), drop = FALSE]
+X <- dplyr::select(X, where(is.numeric))  # <<< ALTERADO
+X <- as.matrix(X)
+  
+# Conferir segurança
+if (!is.numeric(X)) stop("A matriz X contém colunas não numéricas")  # <<< ALTERADO
+  
+m <- ncol(X) # número de gêneros
+n <- nrow(X) # número de amostras
+
+# Evitar problema de log(0)
+X[X == 0] <- 1e-10
+
+# Gerar log das abundâncias relativas
+logX <- log(X)
+
+# Armazenar a combinação de todos os pares possíveis
+idx <- which(upper.tri(matrix(1, m, m)), arr.ind = TRUE)
+np <- nrow(idx)
+
+norm <- numeric(np)
+homo <- numeric(np)
+
+# Modelagem ANOVA + testes
+get_p <- function(y, grupo) {
+  fit <- aov(y ~ grupo)
+  s <- shapiro.test(residuals(fit))
+  h <- bartlett.test(y ~ grupo)
+  return(c(s$p.value, h$p.value))  # <<< ALTERADO (era s$p)
+}
+
+for (k in seq_len(np)) {
+  i <- idx[k, 1]
+  j <- idx[k, 2]
+  y <- logX[, i] - logX[, j]
+  var <- get_p(y, grupo)
+  norm[k] <- var[1]
+  homo[k] <- var[2]
+}
+
+# Acrescentar porcentagens no output
+list(
+  homo = homo,
+  norm = norm,
+  perc = list(
+    normal_ok   = sum(norm > alpha) / length(norm) * 100,
+    normal_fail = sum(norm <= alpha) / length(norm) * 100,
+    homo_ok     = sum(homo > alpha) / length(homo) * 100,
+    homo_fail   = sum(homo <= alpha) / length(homo) * 100
+  )
+ )
+}
+
+# Avaliar testes
+sup <- anova_check(dados_microbioma, treat_col = 1)
+
+norm <- sup$norm
+homo <- sup$homo
+
+# Gerar boxplot
+boxplot(norm, homo,
+        names = c("Shapiro", "Bartlett"),
+        ylab = "p-value",
+        xlab = "Teste estatistico")
+
+# Adicionar linha horizontal em 0.05
+abline(h = 0.05, lty = 2, lwd = 2, col = "red")
+
+text(x = 1.5, y = 0.8, labels = "n = 1225")
+
+
+# =========================
+# Implementar teste ANCOM
+# =========================
+
+#ANCOM
+ancom <- function(df,
+                  treat_col = 1,
+                  alpha = 0.05,
+                  method_adj = "bonferroni",
+                  quantile_cut = 0.7) {
+  
+# Separar variável de tratamento e matriz de abundâncias
+grupo <- factor(df[[treat_col]])
+X <- df[, -(treat_col), drop = FALSE]
+X <- dplyr::select(X, where(is.numeric)) 
+X <- as.matrix(X)
+
+m <- ncol(X)  # número de gênero
+n <- nrow(X)  # número de amostras
+
+# Evitar problema de log(0)
+X[X == 0] <- 1e-10
+
+# Gerar log das abundâncias relativas
+logX <- log(X)
+
+# Fazer combinações dos pares — m(m-1)/2
+idx <- which(upper.tri(matrix(1, m, m)), arr.ind = TRUE)
+np <- nrow(idx)
+
+# Gerar p-values
+p_raw <- numeric(np)
+
+get_p <- function(y, grupo) {
+  kruskal.test(y ~ grupo)$p.value
+}
+  
+# Calcular p para cada par
+for (k in seq_len(np)) {
+  i <- idx[k, 1]
+  j <- idx[k, 2]
+  y <- logX[, i] - logX[, j]
+  p_raw[k] <- get_p(y, grupo)
+}
+
+# Ajustar múltiplo
+p_adj <- p.adjust(p_raw, method = method_adj)
+
+# Gerar matriz p ajustados
+padj_mat <- matrix(NA, m, m)
+colnames(padj_mat) <- colnames(X)
+rownames(padj_mat) <- colnames(X)
+
+for (k in seq_len(np)) {
+  i <- idx[k, 1]
+  j <- idx[k, 2]
+  padj_mat[i, j] <- p_adj[k]
+  padj_mat[j, i] <- p_adj[k]
+}
+
+# Gerar matriz de rejeições
+reject_mat <- padj_mat < alpha
+
+# Rodar Estatística W
+W <- rowSums(reject_mat, na.rm = TRUE)
+
+# Gerar ponto de corte
+cut <- quantile(W, quantile_cut, na.rm = TRUE)
+
+da <- names(W)[W > cut]
+
+list(
+  W = as.data.frame(W),
+  W_cutoff = cut,
+  taxa_da = da,
+  padj_matrix = padj_mat
+)
+}
+
+microbioma_ancom <- ancom(dados_microbioma)
+
+microbioma_ancom$W_cutoff
+
+# Criar dataframe auxiliar com id dos taxa
+df_plot <- microbioma_ancom$W %>%
+  mutate(taxon = row.names(microbioma_ancom$W),
+         x = seq_len(nrow(microbioma_ancom$W)),
+         y = W) 
+
+ggplot(df_plot, aes(x = x, y = y)) +
+  geom_point() +
+  geom_abline(slope = 0, intercept = microbioma_ancom$W_cutoff, color = 'red') +
+  geom_text(data = df_plot %>% filter(y > microbioma_ancom$W_cutoff),
+            aes(label = taxon),
+            vjust = -0.5,
+            size = 3)+
+  xlab("Genus") +
+  ylab("W") +
+  annotate("text",
+           x = 47, y = 44.3,
+           label = "70º Percentil limiar",
+           color = 'red')
+
+# =========================
+# Comaparando o resultados de ANCOM com os resultados anteriores
+# =========================
+
+# Juntar cargas dos componentes principais
+pc1 <- loading[,1]
+pc2 <- loading[,2]
+
+# Avaliar ranking de cargas
+pc1_rank <- rank(-abs(pc1), ties.method = "first")
+pc2_rank <- rank(-abs(pc2), ties.method = "first")
+
+# Avaliar número W de rejeições no teste ANCOM
+W <- microbioma_ancom$W[[1]]
+
+# Compilar valores de abundância relativa
+T1_AR <- colMeans(dados_microbioma[dados_microbioma$tratamento == "T1",2:51], na.rm = TRUE)
+T2_AR <- colMeans(dados_microbioma[dados_microbioma$tratamento == "T2",2:51], na.rm = TRUE)
+T3_AR <- colMeans(dados_microbioma[dados_microbioma$tratamento == "T3",2:51], na.rm = TRUE)
+
+# Compilar valores de CLR
+T1_temp <- dados_microbioma[dados_microbioma$tratamento == "T1",2:51]
+T1_LCR <- colMeans(log(T1_temp) - rowMeans(log(T1_temp)))
+
+T2_temp <- dados_microbioma[dados_microbioma$tratamento == "T2",2:51]
+T2_LCR <- colMeans(log(T2_temp) - rowMeans(log(T2_temp)))
+
+T3_temp <- dados_microbioma[dados_microbioma$tratamento == "T3",2:51]
+T3_LCR <- colMeans(log(T3_temp) - rowMeans(log(T3_temp)))
+
+# =========================
+# Juntando todas as informações das análises
+# =========================
+
+# Checar comprimentos
+vars <- list(
+  pc1 = pc1, pc1_rank = pc1_rank,
+  pc2 = pc2, pc2_rank = pc2_rank,
+  W = W,
+  T1_AR = T1_AR, T2_AR = T2_AR, T3_AR = T3_AR,
+  T1_LCR = T1_LCR, T2_LCR = T2_LCR, T3_LCR = T3_LCR
+)
+
+lens <- sapply(vars, length)
+print(lens)
+
+# Avaliar: se todos iguais -> montar direto; senão tentar alinhar por nomes
+if (length(unique(lens)) == 1) {
+  final_values <- as.data.frame(vars, check.names = FALSE)
+} else {
+  # tentar alinhar por nomes das taxas (melhor prática)
+  # determinar nomes esperados das taxas:
+  taxa_names <- NULL
+  if (!is.null(colnames(dados_microbioma))) {
+    # suposição: colunas taxa estão nas colunas 2:(1+m)
+    taxa_names <- colnames(dados_microbioma)[2:(1 + length(W))]
+  }
+  # função auxiliar para alinhar um vetor por nomes, se possível
+  align_by_names <- function(vec, names_out) {
+    if (!is.null(names(vec)) && length(vec) != length(names_out)) {
+      # reordenar / subset por names_out
+      out <- setNames(rep(NA_real_, length(names_out)), names_out)
+      common <- intersect(names_out, names(vec))
+      out[common] <- vec[common]
+      return(as.numeric(out))
+    }
+    if (length(vec) == 1 && length(names_out) > 1) {
+      # replicar valor único (apenas se parecer intencional)
+      return(rep(vec, length(names_out)))
+    }
+    # se já tem comprimento correto, só devolver
+    return(as.numeric(vec))
+  }
+  # tentar alinhar todos
+  if (!is.null(taxa_names)) {
+    aligned <- lapply(vars, align_by_names, names_out = taxa_names)
+    # checar se agora todos tem mesmo comprimento
+    if (length(unique(sapply(aligned, length))) == 1) {
+      final_values <- as.data.frame(aligned, check.names = FALSE)
+      rownames(final_values) <- taxa_names
+    } else {
+      stop("Não foi possível alinhar automaticamente os vetores — verifique os comprimentos:\n",
+           paste(names(lens), lens, collapse = ", "))
+    }
+  } else {
+    stop("Vetores têm comprimentos diferentes e não foi possível inferir nomes das taxas. Comprimentos:\n",
+         paste(names(lens), lens, collapse = ", "))
+  }
+}
+
+# Garantir que final_values é data.frame e W é coluna numérica
+final_values <- as.data.frame(final_values, check.names = FALSE)
+final_values$W <- as.numeric(final_values$W)
+
+# Exibir top 9 por W (como você queria)
+top9 <- head(final_values[order(final_values$W, decreasing = TRUE), ], 9)
+round(top9, 3)
+
+
+#Comparação dos Componentes Principais e ANCON
+
+# Listar Genus relevantes identificados em cada análise
+
+genus_ancom <- c("Genus_4","Genus_5","Genus_6","Genus_12","Genus_16",
+                 "Genus_18","Genus_26","Genus_43","Genus_50")
+
+genus_pca <- c("Genus_35","Genus_19","Genus_46","Genus_30","Genus_26", "Genus_4","Genus_26","Genus_11","Genus_43","Genus_6")
+
+# Criar dataframe wide com TRUE/FALSE
+todos_genus <- sort(unique(c(genus_ancom, genus_pca)))
+
+
+df_wide <- tibble(
+  Genus = todos_genus,
+  ANCOM = Genus %in% genus_ancom,
+  PCA   = Genus %in% genus_pca
+)
+
+df_wide
+
+# Visualizar Genus dados como relevantes pelas duas análises
+
+genus_true_both <- df_wide %>%
+  filter(ANCOM, PCA) %>%
+  pull(Genus)
+
+genus_true_both
+
